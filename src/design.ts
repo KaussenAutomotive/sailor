@@ -17,12 +17,13 @@ export interface Design {
   sailShape: SailShape;
   camber: number;
   hullColor: string;
+  foils: FoilDesign;
 }
 
 export const presets: Design[] = [
-  { version: 1, name: 'Aurelia 38', type: 'mono', hullShape: 'round', length: 11.6, beam: 3.8, draft: 1.9, mastPosition: 42, mastHeight: 15, mainArea: 38, jibArea: 26, sailShape: 'classic', camber: 8, hullColor: '#42b8ad' },
-  { version: 1, name: 'Nomad 42', type: 'cat', hullShape: 'slender', length: 12.8, beam: 6.8, draft: 1.1, mastPosition: 43, mastHeight: 17, mainArea: 52, jibArea: 30, sailShape: 'square', camber: 10, hullColor: '#5ba8d7' },
-  { version: 1, name: 'Velocity 30', type: 'tri', hullShape: 'chine', length: 9.2, beam: 6.4, draft: 1.3, mastPosition: 40, mastHeight: 13, mainArea: 32, jibArea: 18, sailShape: 'square', camber: 6, hullColor: '#e2ab62' },
+  { version: 1, name: 'Aurelia 38', type: 'mono', hullShape: 'round', length: 11.6, beam: 3.8, draft: 1.9, mastPosition: 42, mastHeight: 15, mainArea: 38, jibArea: 26, sailShape: 'classic', camber: 8, hullColor: '#42b8ad', foils: { ...foilDefaults } },
+  { version: 1, name: 'Nomad 42', type: 'cat', hullShape: 'slender', length: 12.8, beam: 6.8, draft: 1.1, mastPosition: 43, mastHeight: 17, mainArea: 52, jibArea: 30, sailShape: 'square', camber: 10, hullColor: '#5ba8d7', foils: { ...foilDefaults, mass: 7 } },
+  { version: 1, name: 'Velocity 30', type: 'tri', hullShape: 'chine', length: 9.2, beam: 6.4, draft: 1.3, mastPosition: 40, mastHeight: 13, mainArea: 32, jibArea: 18, sailShape: 'square', camber: 6, hullColor: '#e2ab62', foils: { ...foilDefaults, mass: 3 } },
 ];
 
 export const limits = {
@@ -57,6 +58,7 @@ export function parseDesign(text: string): Design {
     mastPosition: d.mastPosition as number, mastHeight: d.mastHeight as number,
     mainArea: d.mainArea as number, jibArea: d.jibArea as number,
     sailShape: d.sailShape as SailShape, camber: d.camber as number, hullColor: d.hullColor,
+    foils: parseFoils(d.foils),
   };
 }
 
@@ -87,7 +89,7 @@ export function hullLayout(d: Design): { z: number; width: number; length: numbe
 export function indicators(d: Design) {
   const s = sailDimensions(d);
   const mx = mastX(d);
-  const mainCenter = mx - s.foot / 3;
+  const mainCenter = mx - (s.foot ** 2 + s.foot * s.top + s.top ** 2) / (3 * (s.foot + s.top));
   const jibCenter = mx + s.jibFoot / 3;
   const area = d.mainArea + d.jibArea;
   const center = (mainCenter * d.mainArea + jibCenter * d.jibArea) / area;
@@ -99,3 +101,4 @@ export function indicators(d: Design) {
     overhang: s.foot > mx + d.length / 2 || s.jibFoot > d.length / 2 - mx,
   };
 }
+import { FoilDesign, foilDefaults, parseFoils } from './foils';

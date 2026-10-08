@@ -13,6 +13,7 @@ app.whenReady().then(() => {
     minHeight: 720,
     backgroundColor: '#f4f6f8',
     title: 'Sailor Studio',
+    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -53,6 +54,22 @@ ipcMain.handle('design:open', async (event) => {
   const stat = await fs.stat(result.filePaths[0]);
   if (stat.size > 65536) throw new Error('Die Entwurfsdatei ist zu groß (max. 64 KB).');
   return fs.readFile(result.filePaths[0], 'utf8');
+});
+
+ipcMain.handle('image:save', async (event, dataUrl) => {
+  if (event.sender !== mainWindow?.webContents) throw new Error('Unbekanntes Fenster.');
+  if (typeof dataUrl !== 'string' || dataUrl.length > 32 * 1024 * 1024 ||
+      !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) throw new Error('Ungültiges oder zu großes PNG-Bild.');
+  const image = Buffer.from(dataUrl.slice('data:image/png;base64,'.length), 'base64');
+  if (!image.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('Keine gültige PNG-Datei.');
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '3D-Ansicht exportieren',
+    defaultPath: 'Bootsentwurf.png',
+    filters: [{ name: 'PNG-Bild', extensions: ['png'] }],
+  });
+  if (result.canceled || !result.filePath) return false;
+  await fs.writeFile(result.filePath, image);
+  return true;
 });
 
 app.on('window-all-closed', () => app.quit());
