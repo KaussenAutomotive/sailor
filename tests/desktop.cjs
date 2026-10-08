@@ -11,11 +11,13 @@ test('desktop: offline rendering, parameters, native save/open, validation and P
   const designFile = path.join(folder, 'test.sailor.json');
   const imageFile = path.join(folder, 'preview.png');
   let desktop;
+  const launchOptions = {
+    ...(process.env.SAILOR_EXECUTABLE ? { executablePath: process.env.SAILOR_EXECUTABLE } : {}),
+    args: [...(process.env.SAILOR_EXECUTABLE ? [] : [path.resolve(__dirname, '..')]), `--user-data-dir=${profile}`],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
+  };
   try {
-    desktop = await _electron.launch({
-      args: [path.resolve(__dirname, '..'), `--user-data-dir=${profile}`],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
-    });
+    desktop = await _electron.launch(launchOptions);
     const userData = await desktop.evaluate(({ app }) => app.getPath('userData'));
     assert.equal(path.resolve(userData).toLowerCase(), path.resolve(profile).toLowerCase(), 'Tests must use an isolated profile');
     const page = await desktop.firstWindow();
@@ -29,6 +31,15 @@ test('desktop: offline rendering, parameters, native save/open, validation and P
     const jib = page.getByRole('slider', { name: 'Vorsegel / Fock' });
     await jib.press('Home');
     assert.equal(await jib.inputValue(), '0');
+    await page.getByRole('button', { name: 'Foils', exact: true }).click();
+    await page.getByRole('switch', { name: 'Hydrofoils aktivieren' }).click();
+    await page.getByRole('button', { name: 'V-Foil', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Flügelumriss' }).selectOption('elliptic');
+    const span = page.getByRole('slider', { name: 'Foil-Spannweite' });
+    await span.press('End');
+    await page.getByRole('region', { name: 'Hydrofoil-Wirkung' }).waitFor();
+    await page.getByRole('button', { name: 'Foil-Detail', exact: true }).click();
+    assert.match(await page.locator('.viewport-caption').innerText(), /WASSER AUSGEBLENDET/);
     await desktop.evaluate(({ dialog }, filename) => {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: filename });
     }, designFile);
@@ -39,6 +50,10 @@ test('desktop: offline rendering, parameters, native save/open, validation and P
     assert.equal(saved.type, 'cat');
     assert.equal(saved.sailShape, 'square');
     assert.equal(saved.jibArea, 0);
+    assert.equal(saved.foils.enabled, true);
+    assert.equal(saved.foils.type, 'V');
+    assert.equal(saved.foils.planform, 'elliptic');
+    assert.equal(saved.foils.span, 3);
 
     const malformedFile = path.join(folder, 'invalid.json');
     await fs.writeFile(malformedFile, JSON.stringify({ ...saved, mastHeight: 999 }));
@@ -57,7 +72,7 @@ test('desktop: offline rendering, parameters, native save/open, validation and P
     }, designFile);
     await page.getByRole('button', { name: 'Entwurf öffnen', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('[aria-label="Entwurfsname"]').value === 'Desktop Test');
-    assert.equal(await jib.inputValue(), '0');
+    assert.equal(await span.inputValue(), '3');
     await desktop.evaluate(({ dialog }, filename) => {
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: filename });
     }, imageFile);
@@ -69,17 +84,20 @@ test('desktop: offline rendering, parameters, native save/open, validation and P
     assert.equal(await page.locator('.scene-error').count(), 0);
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'Desktop layout must fit the window');
-    await page.waitForFunction(() => JSON.parse(localStorage.getItem('sailor-studio.design.v1')).name === 'Desktop Test');
-    await desktop.close();
-    desktop = await _electron.launch({
-      args: [path.resolve(__dirname, '..'), `--user-data-dir=${profile}`],
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
+    await page.waitForFunction(() => {
+      const stored = localStorage.getItem('sailor-studio.design.v1');
+      return stored !== null && JSON.parse(stored).name === 'Desktop Test';
     });
+    await desktop.close();
+    desktop = await _electron.launch(launchOptions);
     const restored = await desktop.firstWindow();
     await restored.waitForFunction(() => document.querySelector('[aria-label="Entwurfsname"]')?.value === 'Desktop Test');
     assert.match(await restored.locator('.design-title small').innerText(), /Katamaran/);
     await restored.getByRole('button', { name: 'Segel', exact: true }).click();
     assert.equal(await restored.getByRole('slider', { name: 'Vorsegel / Fock' }).inputValue(), '0');
+    await restored.getByRole('button', { name: 'Foils', exact: true }).click();
+    assert.equal(await restored.getByRole('slider', { name: 'Foil-Spannweite' }).inputValue(), '3');
+    assert.equal(await restored.getByRole('switch', { name: 'Hydrofoils aktivieren' }).getAttribute('aria-checked'), 'true');
   } finally {
     if (desktop) await desktop.close();
     await fs.rm(folder, { recursive: true, force: true });

@@ -5,7 +5,7 @@ import { Design, hullLayout, mastX, sailDimensions } from './design';
 import { buildFoils } from './foilGeometry';
 import { foilPreviewHeight } from './foils';
 
-export type CameraView = 'perspective' | 'side' | 'top' | 'front';
+export type CameraView = 'perspective' | 'side' | 'top' | 'front' | 'foils';
 export interface SceneHandle { capture(): string; reset(): void }
 interface Props {
   design: Design;
@@ -217,10 +217,10 @@ const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, vi
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(180, 180),
       new THREE.MeshStandardMaterial({ color: '#172f3e', transparent: true, opacity: 0.52, roughness: 0.38, metalness: 0.4, side: THREE.DoubleSide, depthWrite: false }));
     plane.rotation.x = -Math.PI / 2;
-    plane.position.y = -0.25;
+    plane.position.y = 0;
     waterGroup.add(plane);
     const grid = new THREE.GridHelper(140, 100, '#3c6574', '#274553');
-    grid.position.y = -0.24;
+    grid.position.y = 0.01;
     const gridMat = grid.material as THREE.LineBasicMaterial;
     gridMat.transparent = true;
     gridMat.opacity = 0.42;
@@ -259,8 +259,10 @@ const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, vi
     disposeGroup(s.boat);
     s.boat = buildBoat(design, wireframe);
     s.scene.add(s.boat);
-    s.water.visible = water;
   }, [design, wireframe, water]);
+  useEffect(() => {
+    if (state.current) state.current.water.visible = water && view !== 'foils';
+  }, [water, view]);
   useEffect(() => {
     const s = state.current;
     if (!s) return;
@@ -273,7 +275,11 @@ const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, vi
       s.controls.target.set(center.x, center.y * 0.91, 0);
       const target = s.controls.target;
       s.camera.up.set(0, 1, 0);
-      if (view === 'side') s.camera.position.set(target.x, target.y, distance);
+      if (view === 'foils') {
+        const foilDistance = Math.max(design.beam * 1.7, design.foils.span * 3.3, 6) / Math.min(1, s.camera.aspect);
+        target.set(design.length * (0.5 - design.foils.position / 100), -design.foils.immersion + foilPreviewHeight(design.foils), 0);
+        s.camera.position.set(target.x + foilDistance * 0.35, target.y - foilDistance * 0.15, foilDistance);
+      } else if (view === 'side') s.camera.position.set(target.x, target.y, distance);
       else if (view === 'top') {
         s.camera.position.set(target.x, distance, 0.01);
         s.camera.up.set(1, 0, 0);

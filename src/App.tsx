@@ -3,12 +3,13 @@ import {
   Anchor, ArrowDownToLine, ArrowUpRight, Check, ChevronDown, ChevronRight,
   Compass, Copy, Focus, FolderOpen, Grid2X2, HelpCircle, Layers3, Maximize2,
   MousePointer2, Move3D, PanelLeftClose, Plus, RotateCcw, Sailboat,
-  Save, SlidersHorizontal, Sparkles, Waves, Wind, X,
+  Save, SlidersHorizontal, Sparkles, Waves, Wind, X, TrendingUp, Zap,
 } from 'lucide-react';
 import BoatScene, { CameraView, SceneHandle } from './BoatScene';
 import { Design, HullType, NumericKey, indicators, limits, parseDesign, presets } from './design';
+import { FoilDesign, FoilNumericKey, foilIndicators, foilLimits } from './foils';
 
-type Tab = 'hull' | 'rig' | 'sails';
+type Tab = 'hull' | 'rig' | 'sails' | 'foils';
 const typeNames: Record<HullType, string> = { mono: 'Monohull', cat: 'Katamaran', tri: 'Trimaran' };
 const storageKey = 'sailor-studio.design.v1';
 const format = (n: number, decimals = 1) => n.toLocaleString('de-DE', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -27,11 +28,12 @@ function Slider({ label, value, unit, min, max, step = 0.1, onChange, caption }:
   onChange(value: number): void; caption?: string;
 }) {
   const id = `control-${label.replaceAll(' ', '-')}`;
+  const decimals = Math.max(0, Math.ceil(-Math.log10(step)));
   return <div className="slider-control">
-    <div className="slider-label"><label htmlFor={id}>{label}</label><span>{format(value, step >= 1 ? 0 : 1)} <small>{unit}</small></span></div>
+    <div className="slider-label"><label htmlFor={id}>{label}</label><span>{format(value, decimals)} <small>{unit}</small></span></div>
     <input id={id} type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(Number(e.target.value))}
       style={{ '--fill': `${(value - min) / (max - min) * 100}%` } as React.CSSProperties} />
-    <div className="slider-scale"><span>{min} {unit}</span><span>{max} {unit}</span></div>
+    <div className="slider-scale"><span>{format(min, Number.isInteger(min) ? 0 : decimals)} {unit}</span><span>{format(max, Number.isInteger(max) ? 0 : decimals)} {unit}</span></div>
     {caption && <p className="control-caption">{caption}</p>}
   </div>;
 }
@@ -43,6 +45,64 @@ function download(content: string, filename: string, mime: string) {
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function FoilPanel({ foils, onChange }: { foils: FoilDesign; onChange(next: FoilDesign): void }) {
+  const f = foils;
+  const slider = (key: FoilNumericKey, label: string, unit: string, step = 1, caption?: string) =>
+    <Slider label={label} value={f[key]} unit={unit} min={foilLimits[key][0]} max={foilLimits[key][1]} step={step}
+      onChange={value => onChange({ ...f, [key]: value })} caption={caption} />;
+  return <>
+    <div className="foil-toggle-card"><span className="foil-toggle-icon"><Zap size={21} /></span><div><strong>Über die Wasserlinie</strong><small>Hydrofoils für dein Konzept</small></div><button className={`switch ${f.enabled ? 'on' : ''}`} role="switch" aria-checked={f.enabled} aria-label="Hydrofoils aktivieren" onClick={() => onChange({ ...f, enabled: !f.enabled })}><span /></button></div>
+    {!f.enabled && <p className="foil-disabled-note">Aktiviere die Foils, um Flügelformen zu bearbeiten und ihre idealisierte Wirkung zu vergleichen.</p>}
+    <fieldset className="foil-controls" disabled={!f.enabled}>
+      <div className="section-label spaced">01 <span>FOIL-ARCHITEKTUR</span></div>
+      <div className="foil-types">{(['T', 'L', 'V'] as const).map(type => <button key={type} className={f.type === type ? 'active' : ''} aria-pressed={f.type === type} onClick={() => onChange({ ...f, type })}><svg viewBox="0 0 70 55"><path d={type === 'T' ? 'M35 7V42M12 42H58' : type === 'L' ? 'M48 7V39Q48 43 43 43H15' : 'M12 7L22 32L35 44L48 32L58 7'} /></svg><span>{type}-Foil</span></button>)}</div>
+      <label className="field-label foil-form-label" htmlFor="foil-planform">Flügelumriss</label><div className="select-wrap"><select id="foil-planform" value={f.planform} onChange={e => onChange({ ...f, planform: e.target.value as FoilDesign['planform'] })}><option value="straight">Rechteckig · konstante Tiefe</option><option value="tapered">Trapezförmig · verjüngte Spitzen</option><option value="elliptic">Elliptisch · weiche Kontur</option></select><ChevronDown size={14} /></div>
+      <div className="section-label spaced">02 <span>FORMGEBUNG</span><span className="unit-tag">PRO FLÜGEL</span></div>
+      {slider('span', 'Foil-Spannweite', 'm', 0.1)}
+      {slider('chord', 'Flügeltiefe', 'm', 0.01)}
+      {f.planform === 'tapered' && slider('taper', 'Spitzentiefe / Wurzeltiefe', '%')}
+      {slider('sweep', 'Pfeilung', '°')}
+      {slider('cant', 'V-Winkel / Neigung', '°')}
+      {slider('thickness', 'Profildicke', '%', 1, 'Symmetrischer NACA-artiger Querschnitt. Dicke und Pfeilung sind im Kraftmodell nicht berücksichtigt.')}
+      <div className="section-label spaced">03 <span>POSITION & TRIMM</span></div>
+      {slider('position', 'Foilposition ab Bug', '%')}
+      {slider('immersion', 'Foil-Eintauchtiefe', 'm', 0.1, 'Tiefe des Flügelansatzes unter der Modellwasserlinie.')}
+      {slider('incidence', 'Foil-Anstellwinkel', '°', 0.5)}
+      <div className="section-label spaced">04 <span>WIRKUNGSVERGLEICH</span></div>
+      {slider('speed', 'Geschwindigkeit', 'kn', 0.5)}
+      {slider('mass', 'Angenommene Gesamtmasse', 't', 0.1)}
+      <label className="checkbox-field"><input type="checkbox" checked={f.visualize} onChange={e => onChange({ ...f, visualize: e.target.checked })} /><span>Kraftpfeile & symbolischen Hub zeigen</span></label>
+      <div className="info-card foil-model-note"><HelpCircle size={16} /><div><strong>Vergleich statt Flugprognose</strong><p>Zwei vollständig eingetauchte Hauptflügel. Ohne Stall, Kavitation, Oberflächenwirkung, Ruderfoils oder Flugregelung. Der Hub ist eine Illustration, kein Gleichgewichtszustand.</p></div></div>
+    </fieldset>
+  </>;
+}
+
+function FoilEffects({ design }: { design: Design }) {
+  const f = design.foils;
+  const info = foilIndicators(f);
+  const peak = foilIndicators({ ...f, speed: 35 });
+  const max = Math.max(info.weight * 1.4, Math.abs(peak.lift) * 1.12);
+  const points = Array.from({ length: 36 }, (_, speed) => `${12 + speed / 35 * 226},${78 - Math.abs(foilIndicators({ ...f, speed }).lift) / max * 62}`).join(' ');
+  const weightY = 78 - info.weight / max * 62;
+  const x = 12 + f.speed / 35 * 226;
+  const y = 78 - Math.abs(info.lift) / max * 62;
+  const tipReach = f.span * (f.type === 'T' ? 0.5 : 1) * Math.cos(f.cant * Math.PI / 180);
+  const attachment = design.beam * (design.type === 'mono' ? 0.36 : 0.42);
+  const bottomAttachment = attachment - (f.type === 'V' ? Math.min(attachment * 0.6, f.immersion * Math.tan(f.cant * Math.PI / 180)) : 0);
+  const surfaceRisk = f.span * (f.type === 'T' ? 0.5 : 1) * Math.sin(f.cant * Math.PI / 180) + f.chord * 0.15 > f.immersion;
+  const overlap = tipReach > bottomAttachment;
+  return <section className="foil-effects" aria-label="Hydrofoil-Wirkung">
+    <div className="foil-effect-heading"><span className="foil-effect-logo"><Zap size={18} /></span><div><strong>Foil Lab<span>EXPERIMENTELL</span></strong><p>{f.type}-Foils · {format(info.area, 2)} m² Fläche · {format(f.speed)} kn · {format(f.mass)} t</p></div><span className="foil-assumption">IDEALISIERT · VOLL EINGETAUCHT</span></div>
+    <div className="foil-effect-grid">
+      <div className={`foil-stat ${info.lift < 0 ? 'negative' : ''}`}><label>VERTIKALER AUFTRIEB</label><strong>{format(info.lift / 1000)} <small>kN</small></strong><p>{format(info.fraction * 100, 0)} % der Gewichtskraft</p><div className="lift-meter"><span style={{ width: `${Math.min(100, Math.abs(info.fraction) * 100)}%` }} /></div></div>
+      <div className="foil-stat"><label>FLÜGELWIDERSTAND</label><strong>{format(info.drag / 1000, 2)} <small>kN</small></strong><p>Profil + induzierter Anteil<br />Ohne Rumpf- / Strebenwiderstand</p></div>
+      <div className="foil-stat"><label>AUFTRIEB = GEWICHT</label><strong>{info.referenceSpeed === null ? '—' : format(info.referenceSpeed)} <small>{info.referenceSpeed === null ? '' : 'kn'}</small></strong><p>{info.referenceSpeed === null ? 'Kein positiver Auftrieb bei diesem Winkel' : 'Theoretische Referenz, keine Abhebegeschwindigkeit'}</p></div>
+      <div className="foil-curve"><div><TrendingUp size={12} /><span>AUFTRIEBSBETRAG / TEMPO</span></div><svg viewBox="0 0 250 100" role="img" aria-label="Idealisierter Auftriebsbetrag steigt quadratisch mit der Geschwindigkeit"><path d="M12 78H238" stroke="#dce9e3" /><path d={`M12 ${weightY}H238`} stroke="#b7c8ad" strokeDasharray="3 4" /><polyline points={points} fill="none" stroke={info.lift < 0 ? '#c18462' : '#4fae92'} strokeWidth="2" /><path d={`M${x} 78V${y}`} stroke="#9dc7b6" strokeDasharray="2 3" /><circle cx={x} cy={y} r="3.5" fill={info.lift < 0 ? '#c18462' : '#4fae92'} /><text x="12" y="96">0 kn</text><text x="211" y="96">35 kn</text><text x="16" y={Math.max(10, weightY - 4)}>Gewicht</text></svg></div>
+    </div>
+    <div className={`foil-effect-footnote ${surfaceRisk || overlap ? 'foil-warning' : ''}`}><HelpCircle size={12} /><span>{overlap ? 'Foil-Flügel können sich überschneiden. Spannweite, Neigung oder Bootbreite prüfen; Flächenbilanz ist dann nicht gültig.' : surfaceRisk ? 'Oberflächenberührung möglich: Neigung und Eintauchtiefe prüfen. Das Modell berechnet keine teilgetauchten Foils.' : 'Konzeptmodell: Kraftpfeile zeigen die Richtung. Hubhöhe ist symbolisch; kein Stabilitäts- oder Leistungsnachweis.'}</span></div>
+  </section>;
 }
 
 export default function App() {
@@ -98,6 +158,9 @@ export default function App() {
     const timer = setTimeout(() => setToast(null), 4200);
     return () => clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    if (!design.foils.enabled && view === 'foils') setView('perspective');
+  }, [design.foils.enabled, view]);
   useEffect(() => {
     window.addEventListener('pointerup', endGesture);
     window.addEventListener('pointercancel', endGesture);
@@ -253,11 +316,11 @@ export default function App() {
           <div className="canvas-header"><div className="design-title"><span className="design-symbol"><Sailboat size={19} /></span><div><input aria-label="Entwurfsname" maxLength={60} value={design.name} onChange={e => change({ ...design, name: e.target.value })} /><small>{typeNames[design.type]} <span> / </span> Konzeptentwurf</small></div><span className="revision">V1</span></div><div className="history-actions"><button className="icon-button" title="Rückgängig" disabled={!undo.length} onClick={undoChange}><RotateCcw size={17} /></button><button className="icon-button redo" title="Wiederholen" disabled={!redo.length} onClick={redoChange}><RotateCcw size={17} /></button><span /><button className="icon-button" title="Entwurf duplizieren" onClick={() => { change({ ...design, name: `${design.name.slice(0, 52)} Kopie` }); notify('Arbeitskopie erstellt. Zum Behalten als Datei speichern.'); }}><Copy size={16} /></button></div></div>
           <div className="viewport" ref={viewport}>
             <BoatScene ref={scene} design={design} view={view} wireframe={wireframe} water={water} />
-            <div className="viewport-top"><span className="live-badge"><span /> LIVE PREVIEW</span><span className="viewport-caption">PARAMETRIC DESIGN / 01</span></div>
-            <div className="view-selector">{([['perspective', '3D'], ['side', 'Seite'], ['top', 'Deck'], ['front', 'Bug']] as const).map(([key, label]) => <button key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>{key === 'perspective' && <Move3D size={13} />}{label}</button>)}</div>
+            <div className="viewport-top"><span className="live-badge"><span /> LIVE PREVIEW</span><span className="viewport-caption">{view === 'foils' ? 'FOIL DETAIL / WASSER AUSGEBLENDET' : 'PARAMETRIC DESIGN / 01'}</span></div>
+            <div className="view-selector">{([['perspective', '3D'], ['side', 'Seite'], ['top', 'Deck'], ['front', 'Bug']] as const).map(([key, label]) => <button key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>{key === 'perspective' && <Move3D size={13} />}{label}</button>)}{design.foils.enabled && <button className={view === 'foils' ? 'active' : ''} onClick={() => setView('foils')}><Zap size={12} /> Foil-Detail</button>}</div>
             <div className="viewport-tools">
               <button title="Ansicht zentrieren" onClick={() => scene.current?.reset()}><Focus size={18} /></button>
-              <button title="Wasserfläche umschalten" className={water ? 'active' : ''} onClick={() => setWater(!water)}><Waves size={18} /></button>
+              <button title={view === 'foils' ? 'Wasser ist in der Foil-Detailansicht ausgeblendet' : 'Wasserfläche umschalten'} disabled={view === 'foils'} className={water && view !== 'foils' ? 'active' : ''} onClick={() => setWater(!water)}><Waves size={18} /></button>
               <button title="Maße einblenden" className={dimensions ? 'active' : ''} onClick={() => setDimensions(!dimensions)}><SlidersHorizontal size={18} /></button>
               <span /><button title="Vollbild" onClick={fullscreen}><Maximize2 size={17} /></button>
             </div>
@@ -270,7 +333,7 @@ export default function App() {
 
         <aside className="inspector">
           <div className="inspector-heading"><div><SlidersHorizontal size={17} /><strong>Designparameter</strong></div><button className="icon-button" title="Aktuelle Vorlage zurücksetzen" onClick={() => usePreset(presets.find(p => p.type === design.type)!)}><RotateCcw size={15} /></button></div>
-          <div className="inspector-tabs">{([['hull', 'Rumpf'], ['rig', 'Rigg'], ['sails', 'Segel']] as const).map(([key, label]) => <button key={key} onClick={() => setTab(key)} className={tab === key ? 'active' : ''}>{label}</button>)}</div>
+          <div className="inspector-tabs">{([['hull', 'Rumpf'], ['rig', 'Rigg'], ['sails', 'Segel'], ['foils', 'Foils']] as const).map(([key, label]) => <button key={key} onClick={() => setTab(key)} className={tab === key ? 'active' : ''}>{key === 'foils' && <Zap size={10} />}{label}</button>)}</div>
           <div className="inspector-content" onPointerDown={event => { if (event.target instanceof HTMLInputElement && event.target.type === 'range') startGesture(); }} onPointerUp={endGesture} onPointerCancel={endGesture} onBlur={endGesture}>
             {tab === 'hull' && <>
               <div className="section-label">01 <span>RUMPFKONZEPT</span></div>
@@ -301,6 +364,7 @@ export default function App() {
               {slider('camber', 'Profiltiefe', '%', 1, 'Visuelle Wölbung relativ zur Unterlieklänge.')}
               <div className="sail-total"><Wind size={21} /><span>Gesamtsegelfläche<strong>{format(data.area, 0)} <small>m²</small></strong></span><ArrowUpRight size={18} /></div>
             </>}
+            {tab === 'foils' && <FoilPanel foils={design.foils} onChange={foils => change({ ...design, foils })} />}
           </div>
           <div className="inspector-note"><Sparkles size={15} /><span>Deine Idee, parametrisch gedacht.<br /><strong>Alles bleibt veränderbar.</strong></span></div>
         </aside>
@@ -312,6 +376,7 @@ export default function App() {
         <div className="metric"><span className="metric-icon"><Waves size={21} /></span><div><label>RUMPFREFERENZ</label><strong>{format(data.hullSpeed)} <small>kn</small><span className="estimate">≈</span></strong><p>Verdrängerformel · nicht Vmax</p></div></div>
         <div className="metric"><span className="metric-icon"><Move3D size={20} /></span><div><label>SCHLANKHEIT</label><strong>{format(data.slenderness)} <small>L / B</small></strong><p>{design.type === 'mono' ? 'Hauptrumpf' : 'Einzel- / Hauptrumpf'}</p></div></div>
       </section>
+      {design.foils.enabled && <FoilEffects design={design} />}
       <footer className="page-footer"><span className={data.overhang ? 'warning-text' : ''}>{data.overhang ? <HelpCircle size={13} /> : <Check size={13} />}{data.overhang ? 'Segel ragen über den Rumpf: Flächen, Mastposition und Höhe prüfen.' : 'Konzept bereit zum Weiterdenken.'}</span><span>Konzeptvisualisierung · keine Baupläne oder Stabilitätsnachweise <button onClick={() => setModal('help')} aria-label="Hinweise zu Näherungswerten"><HelpCircle size={13} /></button></span></footer>
     </main>
 
@@ -327,7 +392,7 @@ export default function App() {
     {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role={toast.error ? 'alert' : 'status'}>{toast.error ? <HelpCircle size={18} /> : <Check size={18} />}<span>{toast.message}</span><button aria-label="Meldung schließen" onClick={() => setToast(null)}><X size={16} /></button></div>}
     {modal && <div className="modal-backdrop" onClick={() => setModal(null)}><section ref={modalElement} className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={e => e.stopPropagation()}><button autoFocus className="modal-close icon-button" aria-label="Dialog schließen" onClick={() => setModal(null)}><X size={20} /></button>
       <div className="eyebrow">{modal === 'new' ? 'EIN NEUER HORIZONT' : 'WILLKOMMEN AN BORD'}</div><h2 id="modal-title">{modal === 'new' ? 'Womit beginnt deine Idee?' : 'Dein Studio. Kurz erklärt.'}</h2>
-      {modal === 'new' ? <><p>Wähle einen Startpunkt und forme daraus dein eigenes Boot. Der aktuelle Entwurf bleibt über Rückgängig erreichbar; speichere wichtige Varianten als Datei.</p><div className="modal-presets">{presets.map(p => <button key={p.type} onClick={() => usePreset(p)}><HullIcon type={p.type} /><strong>{p.name}</strong><span>{typeNames[p.type]} · {format(p.length)} m</span><ArrowUpRight size={18} /></button>)}</div></> : <><p>Sailor Studio ist dein visuelles Werkzeug für frühe Segelbootkonzepte.</p><div className="help-sections"><div><Move3D /><span><strong>Erkunde dein Boot</strong><p>Linke Maustaste: drehen. Mausrad: zoomen. Rechte Maustaste: verschieben. Die Ansichtstasten zeigen Seite, Deck und Bug.</p></span></div><div><SlidersHorizontal /><span><strong>Forme deine Idee</strong><p>Rumpf: Typ, Maße und Spantform. Rigg: Mastposition und Höhe. Segel: Flächen, Kopf und Wölbung. Die Gesamtbreite schließt alle Rümpfe ein.</p></span></div><div><Save /><span><strong>Behalte deine Entwürfe</strong><p>Der letzte Arbeitsstand wird lokal automatisch gesichert. Über „Entwurf speichern“ legst du unabhängige JSON-Dateien an. „Bildexport“ speichert die 3D-Ansicht als PNG.</p></span></div></div><div className="safety-note"><strong>Konzept, nicht Konstruktion</strong><p>Die Rumpfreferenz verwendet 2,43 × √(0,92 × Länge in m). Sie gilt als grobe Verdränger-Näherung, nicht als Geschwindigkeitsprognose für Mehr­rümpfer. Segelflächen sind ebene Umrissflächen, Profiltiefe ist rein visuell. Auftrieb, Gewicht, Ballast, Stabilität, Lasten und hydrodynamische Kräfte werden nicht berechnet. Vor Bau oder Nutzung ist eine fachliche Auslegung erforderlich.</p></div></>}
+      {modal === 'new' ? <><p>Wähle einen Startpunkt und forme daraus dein eigenes Boot. Der aktuelle Entwurf bleibt über Rückgängig erreichbar; speichere wichtige Varianten als Datei.</p><div className="modal-presets">{presets.map(p => <button key={p.type} onClick={() => usePreset(p)}><HullIcon type={p.type} /><strong>{p.name}</strong><span>{typeNames[p.type]} · {format(p.length)} m</span><ArrowUpRight size={18} /></button>)}</div></> : <><p>Sailor Studio ist dein visuelles Werkzeug für frühe Segelbootkonzepte.</p><div className="help-sections"><div><Move3D /><span><strong>Erkunde dein Boot</strong><p>Linke Maustaste: drehen. Mausrad: zoomen. Rechte Maustaste: verschieben. Die Ansichtstasten zeigen Seite, Deck und Bug.</p></span></div><div><SlidersHorizontal /><span><strong>Forme deine Idee</strong><p>Rumpf: Typ, Maße und Spantform. Rigg: Mastposition und Höhe. Segel: Flächen, Kopf und Wölbung. Foils: optionale T-, L- oder V-Architektur mit editierbaren Flügeln. Die Gesamtbreite schließt die Rümpfe, nicht auskragende Foils ein.</p></span></div><div><Zap /><span><strong>Vergleiche die Foilwirkung</strong><p>Auftrieb = ½ × 1.025 kg/m³ × Geschwindigkeit² × Flügelfläche × CL × cos(Neigung). CL = 2π × Anstellwinkel in Radiant × AR/(AR+2). Widerstand mit CD = 0,015 + CL²/(π × 0,8 × AR). Beide Flügel werden vollständig eingetaucht angenommen. Pfeilung, Dicke und Streben sind im Kraftmodell nicht berücksichtigt. Kein Stall, keine Kavitation, kein Fluggleichgewicht.</p></span></div><div><Save /><span><strong>Behalte deine Entwürfe</strong><p>Der letzte Arbeitsstand wird lokal automatisch gesichert. Über „Entwurf speichern“ legst du unabhängige JSON-Dateien an. „Bildexport“ speichert die 3D-Ansicht als PNG.</p></span></div></div><div className="safety-note"><strong>Konzept, nicht Konstruktion</strong><p>Die Rumpfreferenz verwendet 2,43 × √(0,92 × Länge in m). Sie gilt als grobe Verdränger-Näherung, nicht als Geschwindigkeitsprognose für Mehr­rümpfer. Segelflächen sind ebene Umrissflächen, Profiltiefe ist rein visuell. Die Foil-Kennzahlen sind stark vereinfachte Vergleiche, keine Abhebe- oder Geschwindigkeitsprognosen. Rumpfauftrieb, tatsächliches Gewicht, Ballast, Stabilität, Lasten und gekoppelte Hydrodynamik werden nicht berechnet. Vor Bau oder Nutzung ist eine fachliche Auslegung erforderlich.</p></div></>}
       <button className="button primary modal-done" onClick={() => setModal(null)}>Zurück ins Studio <ArrowUpRight size={15} /></button>
     </section></div>}
   </div>;

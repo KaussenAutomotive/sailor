@@ -62,7 +62,8 @@ export function buildFoils(length: number, attachmentZ: number, f: FoilDesign, w
     strut.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
     group.add(strut);
     const wing = new THREE.Mesh(wingGeometry(f), new THREE.MeshStandardMaterial({
-      color: '#6fd9c8', metalness: 0.35, roughness: 0.28, wireframe, side: THREE.DoubleSide,
+      color: '#6fd9c8', emissive: '#266f62', emissiveIntensity: 0.32,
+      metalness: 0.35, roughness: 0.28, wireframe, side: THREE.DoubleSide,
     }));
     wing.name = 'foil-wing';
     wing.position.copy(end);
@@ -74,6 +75,11 @@ export function buildFoils(length: number, attachmentZ: number, f: FoilDesign, w
         new THREE.Vector3(0, positive ? 1 : -1, 0), end.clone().add(new THREE.Vector3(0, 0.12, 0)),
         0.45 + Math.min(2.4, Math.abs(info.fraction) * 1.8), positive ? '#72ead0' : '#f2997f', 0.24, 0.14,
       );
+      for (const part of [arrow.line, arrow.cone]) {
+        const materials = Array.isArray(part.material) ? part.material : [part.material];
+        materials.forEach(material => { material.depthTest = false; });
+        part.renderOrder = 2;
+      }
       group.add(arrow);
     }
     if (f.visualize && f.speed > 0) {
