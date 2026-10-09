@@ -1,5 +1,8 @@
 import * as THREE from 'three';
+import { Design } from './design';
 import { FoilDesign, foilChordFactor, foilIndicators } from './foils';
+import { deckY, halfWidth, hullSpecs } from './hullGeometry';
+import { waterProperties } from './flow/water';
 
 export function wingGeometry(f: FoilDesign): THREE.BufferGeometry {
   const positions: number[] = [];
@@ -45,19 +48,39 @@ export function wingGeometry(f: FoilDesign): THREE.BufferGeometry {
   return geometry;
 }
 
-export function buildFoils(length: number, attachmentZ: number, f: FoilDesign, wireframe: boolean) {
+export interface FoilMount { x: number; z: number; top: number; bottomZ: number; sign: number }
+
+// Strut attachment points in the boat frame: deck edge for monohulls, outer hulls for multihulls.
+export function foilMounts(d: Design, wingY: number): FoilMount[] {
+  const f = d.foils;
+  const specs = hullSpecs(d);
+  const x = d.length * (0.5 - f.position / 100);
+  const outer = specs.filter(h => h.z !== 0);
+  const sides = outer.length ? outer.map(h => ({ spec: h, sign: Math.sign(h.z) })) : [-1, 1].map(sign => ({ spec: specs[0], sign }));
+  return sides.map(({ spec, sign }) => {
+    const t = Math.min(0.98, Math.max(0.02, x / spec.length + 0.5));
+    const z = outer.length ? spec.z : sign * (halfWidth(spec, t) + 0.004 * d.length);
+    const top = deckY(spec, t);
+    const inward = f.type === 'V' ? Math.min(Math.abs(z) * 0.6, (top - wingY) * Math.tan(f.cant * Math.PI / 180)) : 0;
+    return { x, z, top, bottomZ: z - sign * inward, sign };
+  });
+}
+
+export function buildFoils(d: Design, restLevel: number, speed: number, wireframe: boolean) {
+  const f = d.foils;
   const group = new THREE.Group();
   group.name = 'hydrofoils';
   if (!f.enabled) return group;
-  const x = length * (0.5 - f.position / 100);
-  const info = foilIndicators(f);
-  for (const sign of [-1, 1]) {
-    const bottomZ = sign * (attachmentZ - (f.type === 'V' ? Math.min(attachmentZ * 0.6, f.immersion * Math.tan(f.cant * Math.PI / 180)) : 0));
-    const start = new THREE.Vector3(x, 0.32, sign * attachmentZ);
-    const end = new THREE.Vector3(x, -f.immersion, bottomZ);
+  const L = d.length;
+  const water = waterProperties(d.flow.water);
+  const info = foilIndicators(f, { speed, mass: d.mass, rho: water.rho, nu: water.nu });
+  const wingY = restLevel - f.immersion;
+  for (const mount of foilMounts(d, wingY)) {
+    const start = new THREE.Vector3(mount.x, mount.top, mount.z);
+    const end = new THREE.Vector3(mount.x, wingY, mount.bottomZ);
     const strutMaterial = new THREE.MeshStandardMaterial({ color: '#324650', metalness: 0.65, roughness: 0.3, wireframe });
     const direction = end.clone().sub(start);
-    const strut = new THREE.Mesh(new THREE.BoxGeometry(f.chord * 0.68, direction.length(), 0.07), strutMaterial);
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(f.chord * 0.68, direction.length(), Math.max(0.002, f.chord * 0.12)), strutMaterial);
     strut.position.copy(start.clone().add(end).multiplyScalar(0.5));
     strut.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
     group.add(strut);
@@ -67,13 +90,13 @@ export function buildFoils(length: number, attachmentZ: number, f: FoilDesign, w
     }));
     wing.name = 'foil-wing';
     wing.position.copy(end);
-    if (f.type !== 'T') wing.scale.z = -sign;
+    if (f.type !== 'T') wing.scale.z = -mount.sign;
     group.add(wing);
-    if (f.visualize && Math.abs(info.lift) > 0.01) {
+    if (f.visualize && Math.abs(info.fraction) > 0.005) {
       const positive = info.lift > 0;
       const arrow = new THREE.ArrowHelper(
-        new THREE.Vector3(0, positive ? 1 : -1, 0), end.clone().add(new THREE.Vector3(0, 0.12, 0)),
-        0.45 + Math.min(2.4, Math.abs(info.fraction) * 1.8), positive ? '#72ead0' : '#f2997f', 0.24, 0.14,
+        new THREE.Vector3(0, positive ? 1 : -1, 0), end.clone().add(new THREE.Vector3(0, 0.03 * L, 0)),
+        L * (0.12 + Math.min(0.6, Math.abs(info.fraction) * 0.45)), positive ? '#72ead0' : '#f2997f', 0.06 * L, 0.035 * L,
       );
       for (const part of [arrow.line, arrow.cone]) {
         const materials = Array.isArray(part.material) ? part.material : [part.material];
@@ -82,13 +105,15 @@ export function buildFoils(length: number, attachmentZ: number, f: FoilDesign, w
       }
       group.add(arrow);
     }
-    if (f.visualize && f.speed > 0) {
-      for (const offset of [-0.13, 0, 0.13]) {
+    if (f.visualize && speed > 0) {
+      for (const offset of [-0.6, 0, 0.6]) {
         const points = Array.from({ length: 18 }, (_, i) => new THREE.Vector3(
-          x - i / 17 * f.speed * 0.13, -f.immersion + Math.sin(i / 17 * Math.PI) * 0.07, bottomZ + offset,
+          mount.x + f.chord * 1.5 - i / 17 * L * (0.15 + speed * 0.08),
+          wingY + Math.sin(i / 17 * Math.PI) * f.chord * (0.5 + Math.max(0, info.cl)),
+          mount.bottomZ + offset * f.span * 0.5,
         ));
         group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),
-          new THREE.LineBasicMaterial({ color: '#6ccabb', transparent: true, opacity: 0.28 })));
+          new THREE.LineBasicMaterial({ color: '#6ccabb', transparent: true, opacity: 0.32 })));
       }
     }
   }
