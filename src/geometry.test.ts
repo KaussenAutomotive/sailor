@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { buildBoat } from './BoatScene';
-import { presets } from './design';
+import { hullLayout, presets } from './design';
+import { displacementMoments, equilibrium } from './hullGeometry';
+import { appendages, lowestPoint } from './appendages';
+import { foilMounts } from './foilGeometry';
 
 function projectedArea(geometry: THREE.BufferGeometry) {
   const positions = geometry.getAttribute('position');
@@ -27,6 +30,35 @@ function release(boat: THREE.Group) {
 }
 
 describe('Rendered boat geometry', () => {
+  it('positioniert Anhaenge und Foil-Paare relativ zu unterschiedlich langen Rümpfen', () => {
+    const design = { ...presets[1], length: 1.5, hullLengths: [0.5, 1.5] };
+    const hulls = hullLayout(design);
+    for (const appendage of appendages(design).foils) {
+      const hull = hulls.find(hull => hull.z === appendage.z)!;
+      expect(Math.abs(appendage.x)).toBeLessThan(hull.length / 2);
+      expect(appendage.x).toBeCloseTo(hull.length * (appendage.kind === 'rudder' ? -0.45 : -0.02));
+    }
+    const mounts = foilMounts(design, -0.1);
+    mounts.forEach(mount => expect(mount.x).toBeCloseTo(hulls[mount.hull].length * (0.5 - design.foils.position / 100)));
+    const boat = buildBoat(design, false);
+    const bounds = new THREE.Box3().setFromObject(boat);
+    expect([bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z].every(Number.isFinite)).toBe(true);
+    release(boat);
+  });
+  it('zeigt Massenschwerpunkt und Volumenschwerpunkt im Bootsrahmen', () => {
+    const design = { ...presets[0], massCenter: { x: -0.035, y: -0.09, z: 0.012 } };
+    const hydro = equilibrium(design);
+    const boat = buildBoat(design, false, hydro, true);
+    const cg = boat.getObjectByName('mass-center')!;
+    const cb = boat.getObjectByName('buoyancy-center')!;
+    expect(cg.position.toArray()).toEqual([-0.035, -0.09, 0.012]);
+    const center = displacementMoments(hydro.prepared, hydro.level).center;
+    expect(cb.position.toArray()).toEqual([center.x, center.y, center.z]);
+    expect(boat.getObjectByName('weight-force')).toBeDefined();
+    expect(boat.getObjectByName('buoyancy-force')).toBeDefined();
+    expect(boat.position.y).toBeCloseTo(-hydro.level);
+    release(boat);
+  });
   it('renders precisely the requested projected main and jib sail areas', () => {
     for (const sailShape of ['classic', 'square'] as const) {
       const d = { ...presets[0], sailShape, camber: 18 };
@@ -43,12 +75,14 @@ describe('Rendered boat geometry', () => {
     expect(boat.getObjectByName('jib-sail')).toBeUndefined();
     release(boat);
   });
-  it('places the keel bottom exactly at the selected draft for every hull concept', () => {
+  it('places appendages relative to the hydrostatic waterline for every model concept', () => {
     for (const preset of presets) {
-      for (const draft of [0.5, 1.9, 3]) {
-        const boat = buildBoat({ ...preset, draft }, false);
+      for (const finDepth of [0.02, 0.2, 0.6]) {
+        const design = { ...preset, finDepth };
+        const hydro = equilibrium(design);
+        const boat = buildBoat(design, false, hydro);
         const bounds = new THREE.Box3().setFromObject(boat);
-        expect(bounds.min.y).toBeCloseTo(-draft, 5);
+        expect(bounds.min.y).toBeCloseTo(lowestPoint(design) - hydro.level, 5);
         expect([bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z].every(Number.isFinite)).toBe(true);
         release(boat);
       }

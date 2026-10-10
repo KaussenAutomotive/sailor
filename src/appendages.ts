@@ -23,7 +23,7 @@ export function appendages(d: Design): { foils: Appendage[]; bulb: Bulb | null }
   const L = d.length;
   const list: Appendage[] = [];
   const add = (h: HullSpec, kind: AppendageKind, x: number, chord: number, depth: number) => {
-    list.push({ kind, x, z: h.z, top: keelY(h, tAt(h, x)) + 0.004 * L, depth, chord, thickness: kind === 'rudder' ? 0.1 : 0.09, lifting: true });
+    list.push({ kind, x, z: h.z, top: keelY(h, tAt(h, x)) + 0.004 * h.length, depth, chord, thickness: kind === 'rudder' ? 0.1 : 0.09, lifting: true });
   };
   const rudderDepth = Math.max(0.03, Math.min(d.finDepth * 0.5 + 0.02, 0.25));
   if (d.type === 'mono') {
@@ -36,12 +36,12 @@ export function appendages(d: Design): { foils: Appendage[]; bulb: Bulb | null }
   }
   if (d.type === 'cat') {
     specs.forEach(h => {
-      add(h, 'board', -0.02 * L, 0.06 * L, d.finDepth);
-      add(h, 'rudder', -0.45 * L, 0.05 * L, rudderDepth);
+      add(h, 'board', -0.02 * h.length, 0.06 * h.length, d.finDepth);
+      add(h, 'rudder', -0.45 * h.length, 0.05 * h.length, rudderDepth);
     });
   } else {
-    add(specs[0], 'board', -0.03 * L, 0.065 * L, d.finDepth);
-    add(specs[0], 'rudder', -0.44 * L, 0.05 * L, rudderDepth);
+    add(specs[0], 'board', -0.03 * specs[0].length, 0.065 * specs[0].length, d.finDepth);
+    add(specs[0], 'rudder', -0.44 * specs[0].length, 0.05 * specs[0].length, rudderDepth);
   }
   return { foils: list, bulb: null };
 }

@@ -1,11 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Design, mastX, sailDimensions } from './design';
-import { buildFoils } from './foilGeometry';
+import { Design, massCenterDefaults, mastX, sailDimensions } from './design';
+import { buildFoils, placedFoilMount } from './foilGeometry';
 import { appendages } from './appendages';
-import { Equilibrium, HullSpec, deckY, equilibrium, halfWidth, hullSpecs, outerSkin, sectionPoints, stationX } from './hullGeometry';
+import { Equilibrium, HullSpec, deckY, displacementMoments, equilibrium, halfWidth, hullSpecs, outerSkin, sectionPoints, stationX } from './hullGeometry';
 import { MichellHull, michellHull, wavePattern } from './flow/michell';
+import { waterProperties } from './flow/water';
 
 export type CameraView = 'perspective' | 'side' | 'top' | 'front' | 'foils';
 export interface SceneHandle { capture(): string; reset(): void }
@@ -14,6 +15,8 @@ interface Props {
   view: CameraView;
   wireframe: boolean;
   water: boolean;
+  selectedFoilId?: string;
+  showCenters?: boolean;
 }
 
 function disposeGroup(group: THREE.Object3D) {
@@ -95,7 +98,7 @@ function hullMeshes(h: HullSpec, d: Design, mat: (color: string, metal?: number)
   return group;
 }
 
-export function buildBoat(d: Design, wireframe: boolean, eq: Equilibrium = equilibrium(d)): THREE.Group {
+export function buildBoat(d: Design, wireframe: boolean, eq: Equilibrium = equilibrium(d), showCenters = false): THREE.Group {
   const boat = new THREE.Group();
   const L = d.length;
   const material = (color: string, metalness = 0.05) => new THREE.MeshStandardMaterial({
@@ -131,19 +134,20 @@ export function buildBoat(d: Design, wireframe: boolean, eq: Equilibrium = equil
     bulb.scale.set(set.bulb.length / 2, set.bulb.diameter / 2, set.bulb.diameter / 2);
     bulb.name = 'bulb';
   }
-  const hatchT = tAt(main, -0.1 * L);
-  const hatch = addMesh(new THREE.BoxGeometry(0.16 * L, 0.006 * L, halfWidth(main, hatchT) * 0.9), material('#405d63', 0.3), -0.1 * L, deckY(main, hatchT) + 0.003 * L, main.z);
+  const hatchT = tAt(main, -0.1 * main.length);
+  const hatch = addMesh(new THREE.BoxGeometry(0.16 * main.length, 0.006 * L, halfWidth(main, hatchT) * 0.9), material('#405d63', 0.3), -0.1 * main.length, deckY(main, hatchT) + 0.003 * L, main.z);
   hatch.name = 'hatch';
 
   const beamY = Math.max(...specs.map(h => deckY(h, 0.5))) + 0.008 * L;
   if (d.type !== 'mono') {
     const outer = specs.filter(h => h.z !== 0);
     const span = Math.abs(outer[0].z - outer[1].z);
+    const commonLength = Math.min(...specs.map(hull => hull.length));
     [-0.2, 0.16].forEach(position => {
-      spar(new THREE.Vector3(L * position, beamY, -span / 2), new THREE.Vector3(L * position, beamY, span / 2), Math.max(0.004, 0.011 * L), '#edf1ec');
+      spar(new THREE.Vector3(commonLength * position, beamY, -span / 2), new THREE.Vector3(commonLength * position, beamY, span / 2), Math.max(0.004, 0.011 * L), '#edf1ec');
     });
     if (d.type === 'cat') {
-      const net = addMesh(new THREE.PlaneGeometry(0.36 * L, span - outer[0].width * 0.8), new THREE.MeshStandardMaterial({ color: '#9fb9b8', transparent: true, opacity: 0.55, side: THREE.DoubleSide, wireframe }), -0.02 * L, beamY - 0.002, 0);
+      const net = addMesh(new THREE.PlaneGeometry(0.36 * commonLength, span - outer[0].width * 0.8), new THREE.MeshStandardMaterial({ color: '#9fb9b8', transparent: true, opacity: 0.55, side: THREE.DoubleSide, wireframe }), -0.02 * commonLength, beamY - 0.002, 0);
       net.rotation.x = -Math.PI / 2;
     }
   }
@@ -156,12 +160,12 @@ export function buildBoat(d: Design, wireframe: boolean, eq: Equilibrium = equil
   const radius = Math.max(0.003, 0.0045 * H);
   spar(new THREE.Vector3(mx, base, 0), new THREE.Vector3(mx, base + H, 0), radius);
   spar(new THREE.Vector3(mx, boomY, 0), new THREE.Vector3(mx - size.foot, boomY, 0), radius * 0.75);
-  const bowX = d.type === 'cat' ? 0.4 * L : 0.48 * L;
+  const bowX = d.type === 'cat' ? 0.4 * main.length : 0.48 * main.length;
   const bowY = d.type === 'cat' ? beamY : deckY(main, 0.98);
   line([new THREE.Vector3(mx, base + H * 0.86, 0), new THREE.Vector3(bowX, bowY, 0)]);
-  line([new THREE.Vector3(mx, base + H, 0), new THREE.Vector3(-0.47 * L, deckY(main, 0.02), 0)]);
+  line([new THREE.Vector3(mx, base + H, 0), new THREE.Vector3(-0.47 * main.length, deckY(main, 0.02), 0)]);
   const shroudZ = d.type === 'mono' ? halfWidth(main, tAt(main, mx)) : Math.min(d.beam / 2, 0.45 * H);
-  [-1, 1].forEach(sign => line([new THREE.Vector3(mx, base + H * 0.78, 0), new THREE.Vector3(mx - 0.03 * L, base, sign * shroudZ)]));
+  [-1, 1].forEach(sign => line([new THREE.Vector3(mx, base + H * 0.78, 0), new THREE.Vector3(mx - 0.03 * main.length, base, sign * shroudZ)]));
   spar(new THREE.Vector3(mx, base + H * 0.5, -0.07 * H), new THREE.Vector3(mx, base + H * 0.5, 0.07 * H), radius * 0.4);
 
   function sail(height: number, foot: number, top: number, direction: number, startY: number, color: string) {
@@ -194,6 +198,28 @@ export function buildBoat(d: Design, wireframe: boolean, eq: Equilibrium = equil
   const pennant = addMesh(new THREE.ConeGeometry(0.012 * H, 0.04 * H, 3), material('#43c9bc'), mx - 0.02 * H, base + H, 0);
   pennant.rotation.z = Math.PI / 2;
   boat.add(buildFoils(d, eq.restLevel, d.flow.speed, wireframe));
+  if (showCenters) {
+    const cg = d.massCenter ?? massCenterDefaults;
+    const cb = displacementMoments(eq.prepared, eq.level).center;
+    for (const [name, center, color] of [['mass-center', cg, '#ff7368'], ['buoyancy-center', cb, '#64baff']] as const) {
+      const marker = new THREE.Mesh(new THREE.SphereGeometry(0.012 * L, 16, 12), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+      marker.name = name;
+      marker.position.set(center.x, center.y, center.z);
+      marker.renderOrder = 4;
+      boat.add(marker);
+      const fraction = name === 'mass-center' ? 1 : eq.volume * waterProperties(d.flow.water).rho / d.mass;
+      if (fraction > 1e-5) {
+        const force = new THREE.ArrowHelper(new THREE.Vector3(0, name === 'mass-center' ? -1 : 1, 0), marker.position.clone(), 0.18 * L * Math.min(1.5, fraction), color, 0.025 * L, 0.014 * L);
+        force.name = name === 'mass-center' ? 'weight-force' : 'buoyancy-force';
+        for (const part of [force.line, force.cone]) {
+          const materials = Array.isArray(part.material) ? part.material : [part.material];
+          materials.forEach(material => { material.depthTest = false; });
+          part.renderOrder = 3;
+        }
+        boat.add(force);
+      }
+    }
+  }
   boat.position.y = -eq.level;
   return boat;
 }
@@ -241,7 +267,7 @@ export function buildWaves(d: Design, eq: Equilibrium): THREE.Mesh | null {
   return mesh;
 }
 
-const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, view, wireframe, water }, ref) {
+const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, view, wireframe, water, selectedFoilId, showCenters = false }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const state = useRef<{
     renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera;
@@ -335,7 +361,7 @@ const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, vi
     const eq = equilibrium(design);
     s.scene.remove(s.boat);
     disposeGroup(s.boat);
-    s.boat = buildBoat(design, wireframe, eq);
+    s.boat = buildBoat(design, wireframe, eq, showCenters);
     s.scene.add(s.boat);
     s.waves.children.slice().forEach(child => { s.waves.remove(child); disposeGroup(child); });
     if (!water || !design.flow.waves) return;
@@ -344,7 +370,16 @@ const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, vi
       if (mesh && state.current) state.current.waves.add(mesh);
     }, 140);
     return () => window.clearTimeout(timer);
-  }, [design, wireframe, water]);
+  }, [design, wireframe, water, showCenters]);
+  useEffect(() => {
+    state.current?.boat.traverse(object => {
+      if (object instanceof THREE.Mesh && object.name === 'foil-wing' && object.material instanceof THREE.MeshStandardMaterial) {
+        const selected = object.userData.foilId === selectedFoilId;
+        object.material.color.set(selected ? '#f2c45b' : '#6fd9c8');
+        object.material.emissive.set(selected ? '#70521c' : '#266f62');
+      }
+    });
+  }, [design, selectedFoilId, wireframe, water, showCenters]);
   useEffect(() => {
     if (state.current) state.current.water.visible = water && view !== 'foils';
   }, [water, view]);
@@ -361,9 +396,13 @@ const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, vi
       const target = s.controls.target;
       s.camera.up.set(0, 1, 0);
       if (view === 'foils') {
-        const foilDistance = Math.max(design.beam * 1.7, design.foils.span * 3.3, design.length * 0.6) / Math.min(1, s.camera.aspect);
-        target.set(design.length * (0.5 - design.foils.position / 100), -design.foils.immersion * 0.6, 0);
-        s.camera.position.set(target.x + foilDistance * 0.35, target.y - foilDistance * 0.15, foilDistance);
+        const selected = design.foils.items?.find(item => item.id === selectedFoilId) ?? design.foils.items?.[0];
+        const foil = selected ?? design.foils;
+        const mount = selected ? placedFoilMount(design, selected) : null;
+        const foilDistance = Math.max(design.beam * 1.7, foil.span * 3.3, design.length * 0.6) / Math.min(1, s.camera.aspect);
+        const hydro = equilibrium(design);
+        target.set(mount?.x ?? design.length * (0.5 - foil.position / 100), hydro.restLevel - hydro.level - foil.immersion, mount?.bottomZ ?? 0);
+        s.camera.position.set(target.x + foilDistance * 0.35, target.y - foilDistance * 0.15, target.z + foilDistance);
       } else if (view === 'side') s.camera.position.set(target.x, target.y, distance);
       else if (view === 'top') {
         s.camera.position.set(target.x, distance, 0.01);
@@ -375,7 +414,7 @@ const BoatScene = forwardRef<SceneHandle, Props>(function BoatScene({ design, vi
     };
     resetRef.current = reset;
     reset();
-  }, [view, design.type, design.length, design.beam, design.hullDepth, design.finDepth, design.mastHeight, design.mastPosition, design.mainArea, design.jibArea, design.sailShape, design.foils]);
+  }, [view, selectedFoilId, design.massCenter, design.hullLengths, showCenters, design.type, design.length, design.beam, design.hullDepth, design.finDepth, design.mastHeight, design.mastPosition, design.mainArea, design.jibArea, design.sailShape, design.foils]);
   return <div className="scene-host" ref={host}>{error && <div className="scene-error" role="alert">{error}</div>}</div>;
 });
 

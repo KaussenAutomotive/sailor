@@ -14,6 +14,10 @@ export interface FlowSettings {
   section: SectionKind;
 }
 
+export interface MassCenter { x: number; y: number; z: number }
+export const massCenterDefaults: MassCenter = { x: 0, y: -0.05, z: 0 };
+export const massCenterLimits = { x: [-1, 1], y: [-0.6, 0.4], z: [-1.4, 1.4] } as const;
+
 // All lengths in metres, areas in m², mass in kg. The tool is scaled for model yachts up to 2 m.
 export interface Design {
   version: 2;
@@ -21,9 +25,12 @@ export interface Design {
   type: HullType;
   hullShape: HullShape;
   length: number;
+  hullLengths?: number[];
   beam: number;
   hullDepth: number;
   finDepth: number;
+  draft: number;
+  wallThickness: number;
   mastPosition: number;
   mastHeight: number;
   mainArea: number;
@@ -34,14 +41,15 @@ export interface Design {
   hullColor: string;
   foils: FoilDesign;
   flow: FlowSettings;
+  massCenter?: MassCenter;
 }
 
 export const flowDefaults: FlowSettings = { speed: 1, leeway: 4, water: 'fresh', waves: true, section: 'keel' };
 
 export const presets: Design[] = [
-  { version: 2, name: 'Aurelia 1000', type: 'mono', hullShape: 'round', length: 1, beam: 0.2, hullDepth: 0.11, finDepth: 0.33, mastPosition: 38, mastHeight: 1.55, mainArea: 0.38, jibArea: 0.22, sailShape: 'classic', camber: 8, mass: 4, hullColor: '#42b8ad', foils: { ...foilDefaults }, flow: { ...flowDefaults } },
-  { version: 2, name: 'Nomad 1200', type: 'cat', hullShape: 'slender', length: 1.2, beam: 0.75, hullDepth: 0.1, finDepth: 0.16, mastPosition: 43, mastHeight: 1.7, mainArea: 0.45, jibArea: 0.2, sailShape: 'square', camber: 10, mass: 3, hullColor: '#5ba8d7', foils: { ...foilDefaults }, flow: { ...flowDefaults, speed: 1.4 } },
-  { version: 2, name: 'Velocity 900', type: 'tri', hullShape: 'chine', length: 0.9, beam: 0.7, hullDepth: 0.1, finDepth: 0.2, mastPosition: 40, mastHeight: 1.3, mainArea: 0.28, jibArea: 0.12, sailShape: 'square', camber: 6, mass: 2.2, hullColor: '#e2ab62', foils: { ...foilDefaults }, flow: { ...flowDefaults, speed: 1.2 } },
+  { version: 2, name: 'Aurelia 1000', type: 'mono', hullShape: 'round', length: 1, beam: 0.2, hullDepth: 0.11, finDepth: 0.33, draft: 0.5, wallThickness: 0.002, mastPosition: 38, mastHeight: 1.55, mainArea: 0.38, jibArea: 0.22, sailShape: 'classic', camber: 8, mass: 4, hullColor: '#42b8ad', foils: { ...foilDefaults }, flow: { ...flowDefaults } },
+  { version: 2, name: 'Nomad 1200', type: 'cat', hullShape: 'slender', length: 1.2, beam: 0.75, hullDepth: 0.1, finDepth: 0.16, draft: 0.6, wallThickness: 0.002, mastPosition: 43, mastHeight: 1.7, mainArea: 0.45, jibArea: 0.2, sailShape: 'square', camber: 10, mass: 3, hullColor: '#5ba8d7', foils: { ...foilDefaults }, flow: { ...flowDefaults, speed: 1.4 } },
+  { version: 2, name: 'Velocity 900', type: 'tri', hullShape: 'chine', length: 0.9, beam: 0.7, hullDepth: 0.1, finDepth: 0.2, draft: 0.4, wallThickness: 0.002, mastPosition: 40, mastHeight: 1.3, mainArea: 0.28, jibArea: 0.12, sailShape: 'square', camber: 6, mass: 2.2, hullColor: '#e2ab62', foils: { ...foilDefaults }, flow: { ...flowDefaults, speed: 1.2 } },
 ];
 
 export const limits = {
@@ -49,12 +57,14 @@ export const limits = {
   beam: [0.05, 1.4],
   hullDepth: [0.02, 0.4],
   finDepth: [0.02, 0.6],
+  draft: [0.1, 2],
+  wallThickness: [0.0004, 0.005],
   mastPosition: [25, 65],
   mastHeight: [0.15, 2.5],
   mainArea: [0.01, 1.2],
   jibArea: [0, 0.8],
   camber: [0, 18],
-  mass: [0.1, 30],
+  mass: [0.1, 10],
 } as const;
 export type NumericKey = keyof typeof limits;
 
@@ -70,7 +80,7 @@ function parseBasics(d: Record<string, unknown>) {
       !['round', 'chine', 'slender'].includes(String(d.hullShape)) ||
       !['classic', 'square'].includes(String(d.sailShape)) ||
       typeof d.hullColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(d.hullColor)) throw new Error('Rumpf- oder Segelkonfiguration ist ungültig.');
-  return { name: d.name.trim(), type: d.type as HullType, hullShape: d.hullShape as HullShape, sailShape: d.sailShape as SailShape, hullColor: d.hullColor };
+  return { name: d.name.trim(), type: d.type as HullType, hullShape: d.hullShape as HullShape, sailShape: d.sailShape as SailShape, hullColor: d.hullColor, wallThickness: d.wallThickness as number };
 }
 
 export function parseFlow(value: unknown): FlowSettings {
@@ -134,6 +144,8 @@ function migrateV1(d: Record<string, unknown>): Design {
     beam: clamp(n('beam') * k, limits.beam),
     hullDepth: clamp((depth + 0.33) * k, limits.hullDepth),
     finDepth: clamp((n('draft') - depth * 0.6) * k, limits.finDepth),
+    draft: clamp(n('draft') * k, limits.draft),
+    wallThickness: 0.002,
     mastPosition: n('mastPosition'),
     mastHeight: clamp(n('mastHeight') * k, limits.mastHeight),
     mainArea: clamp(n('mainArea') * k * k, limits.mainArea),
@@ -157,13 +169,37 @@ export function parseDesignFile(text: string): { design: Design; migrated: boole
     if (!finite(d[key], min, max)) throw new Error(`Ungültiger Wert für ${key}: erlaubt sind ${min} bis ${max}.`);
   }
   const n = (key: NumericKey) => d[key] as number;
+  let massCenter: MassCenter | undefined;
+  if (d.massCenter !== undefined) {
+    if (!d.massCenter || typeof d.massCenter !== 'object' || Array.isArray(d.massCenter)) throw new Error('Ungueltiger Massenschwerpunkt.');
+    const center = d.massCenter as Record<string, unknown>;
+    for (const key of ['x', 'y', 'z'] as const) {
+      const [min, max] = massCenterLimits[key];
+      if (!finite(center[key], min, max)) throw new Error(`Ungueltiger Schwerpunktwert: ${key}.`);
+    }
+    massCenter = { x: center.x as number, y: center.y as number, z: center.z as number };
+  }
+  const foils = parseFoils(d.foils);
+  const hullCount = basics.type === 'mono' ? 1 : basics.type === 'cat' ? 2 : 3;
+  let hullLengths: number[] | undefined;
+  if (d.hullLengths !== undefined) {
+    if (!Array.isArray(d.hullLengths) || d.hullLengths.length !== hullCount || d.hullLengths.some(value => !finite(value, limits.length[0], limits.length[1]))) {
+      throw new Error('Ungueltige Einzellaengen: je vorhandenem Rumpf 0,3 bis 2 m.');
+    }
+    hullLengths = d.hullLengths as number[];
+    if (Math.abs(Math.max(...hullLengths) - n('length')) > 1e-9) throw new Error('Gesamtlaenge muss der Laenge des laengsten Rumpfs entsprechen.');
+  }
+  if (foils.items?.some(item => item.hull >= hullCount)) throw new Error('Foil ist einem nicht vorhandenen Rumpf zugeordnet.');
   return {
     design: {
       version: 2, ...basics,
       length: n('length'), beam: n('beam'), hullDepth: n('hullDepth'), finDepth: n('finDepth'),
+      draft: n('draft'), wallThickness: n('wallThickness'),
       mastPosition: n('mastPosition'), mastHeight: n('mastHeight'), mainArea: n('mainArea'), jibArea: n('jibArea'),
       camber: n('camber'), mass: n('mass'),
-      foils: parseFoils(d.foils), flow: parseFlow(d.flow),
+      foils, flow: parseFlow(d.flow),
+      ...(massCenter ? { massCenter } : {}),
+      ...(hullLengths ? { hullLengths: [...hullLengths] } : {}),
     },
     migrated: false,
   };
@@ -175,7 +211,8 @@ export function parseDesign(text: string): Design {
 
 // X runs from stern (-L/2) to bow (+L/2); mast position is measured from the bow.
 export function mastX(d: Design): number {
-  return d.length * (0.5 - d.mastPosition / 100);
+  const main = hullLayout(d).find(hull => hull.main)!;
+  return main.length * (0.5 - d.mastPosition / 100);
 }
 
 export function sailDimensions(d: Design) {
@@ -192,13 +229,32 @@ export function hullLayout(d: Design): HullPlacement[] {
   if (d.type === 'mono') return [{ z: 0, width: d.beam, length: d.length, depth: d.hullDepth, yBase: 0, main: true }];
   const width = Math.min(d.beam * 0.22, d.length * 0.12);
   if (d.type === 'cat') {
-    return [-1, 1].map(sign => ({ z: sign * (d.beam - width) / 2, width, length: d.length, depth: d.hullDepth, yBase: 0, main: sign === 1 }));
+    return [-1, 1].map((sign, index) => ({ z: sign * (d.beam - width) / 2, width, length: d.hullLengths?.[index] ?? d.length, depth: d.hullDepth, yBase: 0, main: sign === 1 }));
   }
   const amaWidth = width * 0.7;
   return [
-    { z: 0, width: Math.min(d.beam * 0.29, d.length * 0.23), length: d.length, depth: d.hullDepth, yBase: 0, main: true },
-    ...[-1, 1].map(sign => ({ z: sign * (d.beam - amaWidth) / 2, width: amaWidth, length: d.length * 0.85, depth: d.hullDepth * 0.8, yBase: d.hullDepth * 0.3, main: false })),
+    { z: 0, width: Math.min(d.beam * 0.29, d.length * 0.23), length: d.hullLengths?.[0] ?? d.length, depth: d.hullDepth, yBase: 0, main: true },
+    ...[-1, 1].map((sign, index) => ({ z: sign * (d.beam - amaWidth) / 2, width: amaWidth, length: d.hullLengths?.[index + 1] ?? d.length * 0.85, depth: d.hullDepth * 0.8, yBase: d.hullDepth * 0.3, main: false })),
   ];
+}
+
+export function setHullLength(d: Design, index: number, length: number): Design {
+  const hullLengths = hullLayout(d).map(hull => clamp(hull.length, limits.length));
+  if (!Number.isInteger(index) || index < 0 || index >= hullLengths.length || !finite(length, limits.length[0], limits.length[1])) throw new Error('Ungueltige Rumpflaenge.');
+  hullLengths[index] = length;
+  return { ...d, length: Math.max(...hullLengths), hullLengths: d.type === 'mono' ? undefined : hullLengths };
+}
+
+export function setHullType(d: Design, type: HullType): Design {
+  const { hullLengths: previousLengths, ...base } = d;
+  const next = { ...base, type };
+  if (!previousLengths) return next;
+  const previous = hullLayout(d);
+  const lengths = hullLayout(next).map(hull => {
+    const matching = previous.find(old => old.main === hull.main && (hull.main || Math.sign(old.z) === Math.sign(hull.z)));
+    return clamp(matching?.length ?? hull.length, limits.length);
+  });
+  return { ...next, length: Math.max(...lengths), ...(type === 'mono' ? {} : { hullLengths: lengths }) };
 }
 
 export function indicators(d: Design) {
@@ -208,10 +264,11 @@ export function indicators(d: Design) {
   const jibCenter = mx + s.jibFoot / 3;
   const area = d.mainArea + d.jibArea;
   const center = (mainCenter * d.mainArea + jibCenter * d.jibArea) / area;
+  const main = hullLayout(d).find(hull => hull.main)!;
   return {
     area,
-    slenderness: d.length / hullLayout(d)[0].width,
+    slenderness: main.length / main.width,
     center,
-    overhang: s.foot > mx + d.length / 2 || s.jibFoot > d.length / 2 - mx,
+    overhang: s.foot > mx + main.length / 2 || s.jibFoot > main.length / 2 - mx,
   };
 }

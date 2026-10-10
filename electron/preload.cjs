@@ -4,4 +4,5 @@ contextBridge.exposeInMainWorld('sailor', {
   save: (content) => ipcRenderer.invoke('design:save', content),
   open: () => ipcRenderer.invoke('design:open'),
   saveImage: (dataUrl) => ipcRenderer.invoke('image:save', dataUrl),
+  saveStep: (content) => ipcRenderer.invoke('step:save', content),
 });

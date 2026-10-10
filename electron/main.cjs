@@ -72,4 +72,20 @@ ipcMain.handle('image:save', async (event, dataUrl) => {
   return true;
 });
 
+ipcMain.handle('step:save', async (event, content) => {
+  if (event.sender !== mainWindow?.webContents) throw new Error('Unbekanntes Fenster.');
+  if (typeof content !== 'string' || Buffer.byteLength(content) > 64 * 1024 * 1024 ||
+      !content.startsWith('ISO-10303-21;') || !content.trimEnd().endsWith('END-ISO-10303-21;')) {
+    throw new Error('Ungueltige oder zu grosse STEP-Datei.');
+  }
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Rumpfschale als STEP exportieren',
+    defaultPath: 'Modellsegler.step',
+    filters: [{ name: 'STEP CAD', extensions: ['step', 'stp'] }],
+  });
+  if (result.canceled || !result.filePath) return false;
+  await fs.writeFile(result.filePath, content, 'utf8');
+  return true;
+});
+
 app.on('window-all-closed', () => app.quit());

@@ -1,5 +1,5 @@
 import earcut from 'earcut';
-import { Design } from './design';
+import { Design, limits } from './design';
 import { HullSpec, Point2, deckY, hullSpecs, outerSkin, sectionPoints, stationX } from './hullGeometry';
 
 export type Vec3 = [number, number, number];
@@ -11,7 +11,7 @@ export const shellResolutions: Record<ShellResolution, { label: string; stations
   fine: { label: 'Fein', stations: 120, m: 32 },
 };
 
-export const wallLimits = { min: 0.0004, max: 0.005 };
+export const wallLimits = { min: limits.wallThickness[0], max: limits.wallThickness[1] };
 
 // Closed polyhedral solid: polygons with counter-clockwise vertex order seen from outside.
 export interface ShellSolid { name: string; vertices: Vec3[]; faces: number[][] }
@@ -117,15 +117,16 @@ function newell(vertices: Vec3[], loop: number[]): Vec3 {
 
 export function hullShell(h: HullSpec, thickness: number, resolution: ShellResolution = 'standard', name = 'Rumpf'): ShellSolid {
   if (!(thickness >= wallLimits.min && thickness <= wallLimits.max)) throw new Error('Wandstärke muss zwischen 0,4 und 5 mm liegen.');
-  const { stations: N, m } = shellResolutions[resolution];
-  const skin = outerSkin(h, N, m);
+  const { stations, m } = shellResolutions[resolution];
+  const tA = thickness / h.length;
+  const skin = outerSkin(h, stations, m, [tA]);
+  const N = skin.stations.length - 1;
   const vertices: Vec3[] = [];
   for (let i = 0; i < skin.positions.length; i += 3) vertices.push([skin.positions[i], skin.positions[i + 1], skin.positions[i + 2]]);
   const outerIndex = (k: number, i: number) => k === N ? N * (m + 1) + Math.min(i, m - i) : k * (m + 1) + i;
   const faces: number[][] = [];
   for (let i = 0; i < skin.indices.length; i += 3) faces.push([skin.indices[i], skin.indices[i + 1], skin.indices[i + 2]]);
 
-  const tA = thickness / h.length;
   const innerTs: number[] = [];
   const innerSections: Point2[][] = [];
   const first = innerSection(h, tA, thickness, m);

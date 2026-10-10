@@ -1,5 +1,5 @@
 import { Design, HullPlacement, HullShape, hullLayout } from './design';
-import { foilIndicators } from './foils';
+import { foilSystemIndicators } from './foils';
 import { gravity, waterProperties } from './flow/water';
 
 export interface HullSpec extends HullPlacement { shape: HullShape }
@@ -61,18 +61,19 @@ export function stationParameters(count: number) {
 export interface HullMesh { positions: number[]; indices: number[]; stations: number[]; m: number }
 
 // Outer skin; the stem collapses to a shared edge so the surface is closed at the bow.
-export function outerSkin(h: HullSpec, stationCount: number, m: number): HullMesh {
-  const stations = stationParameters(stationCount);
+export function outerSkin(h: HullSpec, stationCount: number, m: number, extraStations: readonly number[] = []): HullMesh {
+  const stations = [...new Set([...stationParameters(stationCount), ...extraStations.filter(t => t > 0 && t < 1)])].sort((left, right) => left - right);
+  const lastStation = stations.length - 1;
   const positions: number[] = [];
   const indices: number[] = [];
-  const index = (k: number, i: number) => k === stationCount ? stationCount * (m + 1) + Math.min(i, m - i) : k * (m + 1) + i;
+  const index = (k: number, i: number) => k === lastStation ? lastStation * (m + 1) + Math.min(i, m - i) : k * (m + 1) + i;
   stations.forEach((t, k) => {
     const x = stationX(h, t);
     const points = sectionPoints(h, t, m);
-    const count = k === stationCount ? m / 2 + 1 : m + 1;
+    const count = k === lastStation ? m / 2 + 1 : m + 1;
     for (let i = 0; i < count; i++) positions.push(x, points[i][1], points[i][0]);
   });
-  for (let k = 0; k < stationCount; k++) {
+  for (let k = 0; k < lastStation; k++) {
     for (let i = 0; i < m; i++) {
       const a = index(k, i);
       const b = index(k, i + 1);
@@ -154,6 +155,54 @@ export function submergedVolume(p: PreparedHull, level: number) {
   let volume = 0;
   for (let k = 0; k < areas.length - 1; k++) volume += (areas[k] + areas[k + 1]) / 2 * (p.xs[k + 1] - p.xs[k]);
   return volume;
+}
+
+export function displacementMoments(hulls: PreparedHull[], level: number) {
+  let volume = 0;
+  const moment = { x: 0, y: 0, z: 0 };
+  let waterplaneArea = 0;
+  let waterplaneX = 0;
+  let waterplaneZ = 0;
+  let waterplaneXX = 0;
+  let waterplaneZZ = 0;
+  for (const hull of hulls) {
+    const stations = hull.sections.map((section, index) => {
+      const polygon = clipBelow(section, level);
+      let twiceArea = 0;
+      let centroidZ = 0;
+      let centroidY = 0;
+      polygon.forEach((point, position) => {
+        const next = polygon[(position + 1) % polygon.length];
+        const product = point[0] * next[1] - next[0] * point[1];
+        twiceArea += product;
+        centroidZ += (point[0] + next[0]) * product;
+        centroidY += (point[1] + next[1]) * product;
+      });
+      const area = Math.abs(twiceArea) / 2;
+      const t = hull.ts[index];
+      const width = level > keelY(hull.spec, t) && level < deckY(hull.spec, t) ? halfBreadthAt(hull.spec, t, level) : 0;
+      return { area, x: hull.xs[index], y: Math.abs(twiceArea) > 1e-14 ? centroidY / (3 * twiceArea) : 0,
+        z: Math.abs(twiceArea) > 1e-14 ? centroidZ / (3 * twiceArea) : 0, width };
+    });
+    for (let index = 0; index < stations.length - 1; index++) {
+      const first = stations[index];
+      const second = stations[index + 1];
+      const halfLength = (second.x - first.x) / 2;
+      volume += (first.area + second.area) * halfLength;
+      for (const axis of ['x', 'y', 'z'] as const) moment[axis] += (first.area * first[axis] + second.area * second[axis]) * halfLength;
+      waterplaneArea += 2 * (first.width + second.width) * halfLength;
+      waterplaneX += 2 * (first.width * first.x + second.width * second.x) * halfLength;
+      waterplaneZ += 2 * (first.width + second.width) * hull.spec.z * halfLength;
+      waterplaneXX += 2 * (first.width * first.x ** 2 + second.width * second.x ** 2) * halfLength;
+      waterplaneZZ += (2 * (first.width + second.width) * hull.spec.z ** 2 + 2 / 3 * (first.width ** 3 + second.width ** 3)) * halfLength;
+    }
+  }
+  return { volume,
+    center: volume > 0 ? { x: moment.x / volume, y: moment.y / volume, z: moment.z / volume } : { x: 0, y: level, z: 0 },
+    waterplaneArea,
+    pitchInertia: Math.max(0, waterplaneXX - (waterplaneArea > 0 ? waterplaneX ** 2 / waterplaneArea : 0)),
+    rollInertia: Math.max(0, waterplaneZZ - (waterplaneArea > 0 ? waterplaneZ ** 2 / waterplaneArea : 0)),
+  };
 }
 
 export interface HullHydro {
@@ -283,7 +332,7 @@ export function equilibrium(d: Design, speed = d.flow.speed): Equilibrium {
   const prepared = preparedHulls(d);
   const water = waterProperties(d.flow.water);
   const rest = solveLevel(prepared, d.mass / water.rho);
-  const lift = d.foils.enabled ? foilIndicators(d.foils, { speed, mass: d.mass, rho: water.rho, nu: water.nu }).lift : 0;
+  const lift = foilSystemIndicators(d.foils, { speed, mass: d.mass, rho: water.rho, nu: water.nu }).lift;
   const state = lift !== 0 ? solveLevel(prepared, (d.mass * gravity - lift) / (water.rho * gravity)) : rest;
   const hulls = prepared.map(p => hullHydrostatics(p, state.level));
   const mainIndex = Math.max(0, prepared.findIndex(p => p.spec.main));
